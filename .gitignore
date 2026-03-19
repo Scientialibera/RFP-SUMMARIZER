@@ -14,9 +14,8 @@ fed_context/
 deploy/webapp-env.json
 
 # Test documents (large PDFs, not for source control)
-deploy/test_docs/rfp/
-deploy/test_docs/capabilities/
-test_docs/
+deploy/test_docs/**/*.pdf
+/test_docs/
 
 # IDE
 .vscode/
