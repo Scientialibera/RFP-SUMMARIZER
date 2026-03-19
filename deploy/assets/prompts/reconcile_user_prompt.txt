@@ -1,0 +1,16 @@
+Reconcile the following extraction candidates across RFP Parts.
+If the same date_type appears with different date values, choose the best-supported value and merge pages.
+Use page numbers exactly as provided (PAGE NUMBER TO REFERENCE values). Do not invent new pages.
+For generated fields, use only page numbers that appear in chunk summaries.
+If no diversity allocation evidence is present, set diversity_allocation to false with an explicit reason and empty pages.
+
+Reconciliation failures to resolve (use the referenced pages to choose the correct value):
+{reconciliation_failures}
+
+After reconciliation, generate summary, best_lead_org, cross_sell_opps, and capabilities_for_rfp using the chunk summaries.
+If candidate lists are provided, use them as supporting hints but prioritize evidence from summaries and cited pages.
+RFP Part summaries:
+{chunk_summaries}
+
+Extraction candidates:
+{extraction_candidates}

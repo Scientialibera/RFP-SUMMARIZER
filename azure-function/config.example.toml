@@ -1,0 +1,68 @@
+[azure]
+endpoint = "https://<your-openai-account>.openai.azure.com/"
+model = "gpt-5-mini"
+api_version = "2025-01-01-preview"
+
+[storage]
+account_url = "https://<your-storage-account>.blob.core.windows.net"
+input_container = "uploads"
+reference_container = "reference"
+capabilities_blob = "capabilities_document.pdf"
+output_container = "outputs"
+prompts_container = "prompts"
+
+[prompts]
+system_prompt_blob = "prompts/system_prompt.txt"
+user_prompt_blob = "prompts/user_prompt.txt"
+chunk_system_prompt_blob = "prompts/chunk_system_prompt.txt"
+chunk_user_prompt_blob = "prompts/chunk_user_prompt.txt"
+reconcile_system_prompt_blob = "prompts/reconcile_system_prompt.txt"
+reconcile_user_prompt_blob = "prompts/reconcile_user_prompt.txt"
+
+[schemas]
+full_blob_path = "schemas/rfp_fields_schema.json"
+chunk_blob_path = "schemas/rfp_fields_chunk_schema.json"
+
+[inputs]
+toggle_table = true
+toggle_images = false
+max_attached_images = 50
+min_table_rows = 2
+min_table_cols = 2
+include_table_text = false
+
+[snippets]
+chunk_size = 100
+snippet_size = 20
+summary_top_n = 3
+fee_top_n = 3
+date_top_n = 3
+best_lead_org_top_n = 3
+cross_sell_opps_top_n = 3
+capabilities_for_rfp_top_n = 3
+diversity_allocation_top_n = 3
+page_overlap = 0
+
+[chunking]
+enabled = true
+max_tokens = 60000
+
+[function]
+output_mode = "storage"
+upload_assets = false
+
+[sharepoint]
+enabled = false
+client_state = ""
+site_id = ""
+list_id = ""
+queue_name = "sharepoint-notifications"
+
+[sql]
+server = "<your-sql-server>.database.windows.net"
+database = "<your-database>"
+schema = "dbo"
+table = "rfp_extractions"
+driver = "ODBC Driver 18 for SQL Server"
+encrypt = true
+trust_server_certificate = false

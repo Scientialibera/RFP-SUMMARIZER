@@ -1,0 +1,85 @@
+[azure]
+subscription_id = ""                      # Leave empty to use current az login context
+location = "eastus2"
+resource_group_name = ""                  # Empty = derived as rg-<prefix>
+
+[naming]
+prefix = "rfp-summarizer"
+function_app_name = ""                    # Empty = func-<prefix>
+storage_account_name = ""                 # Empty = st<prefix> (alphanumeric, max 24 chars)
+openai_account_name = ""                  # Empty = aoai-<prefix>
+acr_name = ""                            # Empty = acr<prefix> (alphanumeric, max 50 chars)
+backend_app_name = ""                    # Empty = api-<prefix>
+frontend_app_name = ""                   # Empty = web-<prefix>
+sql_server_name = ""                     # Empty = sql-<prefix>
+sql_database_name = ""                   # Empty = sqldb-<prefix>
+
+[storage]
+input_container = "uploads"               # Blob trigger watches this container for PDF uploads
+reference_container = "reference"         # Capabilities PDF and other reference docs
+output_container = "outputs"              # Extraction results and run artifacts
+prompts_container = "prompts"             # LLM prompt templates (system, user, chunk, reconcile)
+
+[openai]
+deploy_openai_resources = true            # true = create/reuse; false = account must pre-exist (name required in [naming])
+deployment_name = "gpt-5-mini"
+model_name = "gpt-5-mini"
+model_version = "2025-08-07"
+deployment_sku_name = "GlobalStandard"
+capacity = 50                             # Tokens-per-minute in thousands
+api_version = "2025-01-01-preview"
+
+[capabilities]
+blob_name = "capabilities_document.pdf"   # Filename in the reference container
+
+[schemas]
+full_blob_path = "schemas/rfp_fields_schema.json"          # Full extraction schema in prompts container
+chunk_blob_path = "schemas/rfp_fields_chunk_schema.json"    # Per-chunk extraction schema in prompts container
+
+[prompts]
+system_prompt_blob = "prompts/system_prompt.txt"
+user_prompt_blob = "prompts/user_prompt.txt"
+chunk_system_prompt_blob = "prompts/chunk_system_prompt.txt"
+chunk_user_prompt_blob = "prompts/chunk_user_prompt.txt"
+reconcile_system_prompt_blob = "prompts/reconcile_system_prompt.txt"
+reconcile_user_prompt_blob = "prompts/reconcile_user_prompt.txt"
+
+[auth]
+reader_role = "RFP.Reader"               # App Role value for read-only access (view runs, results)
+admin_role = "RFP.Admin"                 # App Role value for write access (modify prompts, schemas)
+reader_users = []                        # UPNs or Object IDs with Reader access (e.g. ["user@contoso.com", "group-object-id"])
+admin_users = []                         # UPNs or Object IDs with Admin access; deployer is auto-added
+
+[webapp]
+deploy_webapp_resources = true           # true = create Container Apps; false = skip
+min_replicas = 0                         # Scale to zero when idle
+max_replicas = 1
+
+[sql]
+deploy_sql_resources = false             # true = create SQL Server + DB; false = skip or use pre-existing
+sku = "Basic"                            # Basic = cheapest (~$5/mo); S0 = Standard
+max_size_bytes = "2147483648"            # 2 GB
+
+[app_settings]
+chunking_enabled = true
+chunking_max_tokens = 60000
+toggle_table = true
+toggle_images = false
+max_attached_images = 50
+output_mode = "storage"
+upload_assets = false
+sharepoint_enabled = false
+
+[paths]
+system_prompt_source = "deploy/assets/prompts/system_prompt.txt"
+user_prompt_source = "deploy/assets/prompts/user_prompt.txt"
+chunk_system_prompt_source = "deploy/assets/prompts/chunk_system_prompt.txt"
+chunk_user_prompt_source = "deploy/assets/prompts/chunk_user_prompt.txt"
+reconcile_system_prompt_source = "deploy/assets/prompts/reconcile_system_prompt.txt"
+reconcile_user_prompt_source = "deploy/assets/prompts/reconcile_user_prompt.txt"
+full_schema_source = "azure-function/app/schemas/rfp_fields_schema.json"
+chunk_schema_source = "azure-function/app/schemas/rfp_fields_chunk_schema.json"
+
+[test_docs]
+capabilities_source = "deploy/test_docs/capabilities/capabilities_document.pdf"
+rfp_source = "deploy/test_docs/rfp/sample_rfp.pdf"

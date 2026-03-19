@@ -1,0 +1,163 @@
+{
+  "name": "extract_rfp_fields",
+  "description": "Extract and generate the required RFP fields with page references and reasons where applicable.",
+  "parameters": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "summary": {
+        "type": "string",
+        "description": "A concise, detailed summary of the RFP that allows understanding of its main points and objectives."
+      },
+      "fee": {
+        "type": "array",
+        "description": "Any type of fee values mentioned in this chunk. Examples include total_fee, not_to_exceed_fee, contingency_fee, option_pricing, and so on.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fee_type": {
+              "type": "string",
+              "description": "Type of fee, written as a key, ie total_fee, not_to_exceed_fee, etc."
+            },
+            "fee": {
+              "type": "string",
+              "description": "Fee details as number if available, else explanation."
+            },
+            "pages": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "description": "1-based page numbers where the fee is found, separated by commas. If multiple fees are mentioned, include all relevant pages."
+            }
+          },
+          "required": ["fee_type", "fee", "pages"]
+        }
+      },
+      "date": {
+        "type": "array",
+        "description": "Proposal's due date/submission deadline entries and other important dates mentioned in RFP. Return an empty array if no dates are found.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "date_type": {
+              "type": "string",
+              "description": "Type of date, e.g., proposal_due_date, submission_deadline."
+            },
+            "date": {
+              "type": "string",
+              "description": "Date as written in the RFP."
+            },
+            "pages": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "description": "1-based page numbers where the date appears."
+            }
+          },
+          "required": ["date_type", "date", "pages"]
+        }
+      },
+      "best_lead_org": {
+        "type": "array",
+        "description": "Generated best lead organization candidates based on RFP needs and internal capabilities document. Include reasons and page references. Can be multiple.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string",
+              "description": "Reason first to guide the subsequent selection."
+            },
+            "best_lead_org": {
+              "type": "string",
+              "description": "Recommended lead organization."
+            },
+            "pages": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "description": "1-based page numbers supporting the recommendation."
+            }
+          },
+          "required": ["reason", "best_lead_org", "pages"]
+        }
+      },
+      "cross_sell_opps": {
+        "type": "array",
+        "description": "Generated cross-sell opportunities that pair RFP needs with internal capabilities document. Include reasons and page references.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string",
+              "description": "Reason first to guide the subsequent opportunity."
+            },
+            "cross_sell_opps": {
+              "type": "string",
+              "description": "Cross-sell opportunity."
+            },
+            "pages": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "description": "1-based page numbers supporting the opportunity."
+            }
+          },
+          "required": ["reason", "cross_sell_opps", "pages"]
+        }
+      },
+      "capabilities_for_rfp": {
+        "type": "array",
+        "description": "Generated capabilities that best fit the RFP scope, grounded in the RFP text and internal capabilities document. Include reasons and page references.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string",
+              "description": "Reason first to guide the subsequent capability."
+            },
+            "capabilities_for_rfp": {
+              "type": "string",
+              "description": "Relevant capability for this RFP."
+            },
+            "pages": {
+              "type": "array",
+              "items": { "type": "integer" },
+              "description": "1-based page numbers supporting the capability."
+            }
+          },
+          "required": ["reason", "capabilities_for_rfp", "pages"]
+        }
+      },
+      "diversity_allocation": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "type": "string",
+            "description": "Reason first to justify the diversity allocation classification. If not found, state that explicitly."
+          },
+          "diversity_allocation": {
+            "type": "boolean",
+            "description": "True if the RFP has diversity allocation requirements, otherwise false."
+          },
+          "pages": {
+            "type": "array",
+            "items": { "type": "integer" },
+            "description": "1-based page numbers where diversity allocation is discussed. Use an empty array if not found."
+          }
+        },
+        "required": ["reason", "diversity_allocation", "pages"]
+      }
+    },
+    "required": [
+      "summary",
+      "fee",
+      "date",
+      "best_lead_org",
+      "cross_sell_opps",
+      "capabilities_for_rfp",
+      "diversity_allocation"
+    ]
+  }
+}

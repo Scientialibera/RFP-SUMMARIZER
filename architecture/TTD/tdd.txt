@@ -1,0 +1,400 @@
+# TDD: RFP Summarization + Insights Pipeline (Chunked Function-Call + SQL Output)
+
+## 0) Purpose
+Build a workflow that triggers when an RFP PDF is added to an Azure Storage container (via Event Grid), processes it with an LLM using **function calling** and **strict JSON outputs**, and writes structured results to SQL (or blob storage) for downstream Power BI consumption.
+
+Key requirements:
+- Handle long documents exceeding context window (up to ~600 pages).
+- Extract single-truth fields (Fee, Dates, Diversity Allocation) with evidence pages.
+- Generate reasoning fields (Best Lead Org, Cross-sell Opps, Capabilities for RFP) using a separate "final decision" pass for coherence.
+- Provide traceability: page indices, optional anchors, confidence scores, and reconciliation step for conflicting extractions.
+
+---
+
+## 1) Scope (POC)
+### In scope
+- Trigger: new PDF in Azure Storage `uploads` container → Event Grid → Azure Function.
+- Chunking with page mapping.
+- LLM calls using:
+  - `analyze_chunk()` function call per chunk.
+  - `reconcile_extractions()` function call if conflicting values found.
+  - `final_recommendations()` function call once per document to produce best lead/cross-sell/capabilities.
+- Write results to blob storage (`outputs` container) or SQL.
+- Return metadata for Power BI.
+
+### Out of scope
+- Full proposal generation.
+- Image/table understanding (optional future, toggle available).
+- OCR for scanned PDFs (optional future; may route to manual review).
+
+---
+
+## 2) Data Model: Fields to Produce
+### A) Summary fields
+- `summary_final` (string): concise final summary.
+- `main_points` (string[] bullets): continuity outline, deduped across chunks.
+- `chunk_summaries` (optional, string[]): store per-chunk summaries for debugging.
+
+### B) Extraction fields (single-truth / reconcile)
+- `fee` (string | null)
+- `fee_pages` (int[] | null)
+- `fee_confidence` (0..1)
+- `fee_anchor` (string | null) — optional locating hint, not a quote
+
+- `date` (string | null) — recommended ISO-like normalization if possible
+- `date_pages` (int[] | null)
+- `date_confidence` (0..1)
+- `date_anchor` (string | null)
+
+- `diversity_allocation` (string | null) — e.g., "15% MBE, 5% WBE"
+- `diversity_pages` (int[] | null)
+- `diversity_confidence` (0..1)
+- `diversity_anchor` (string | null)
+
+### C) Reasoning fields (final decision pass)
+- `best_lead_org` (string)
+- `best_lead_pages` (int[] | null) — optional supporting pages
+- `best_lead_reason` (string) — brief rationale
+
+- `cross_sell_opps` (string[] or string)
+- `cross_sell_pages` (int[] | null)
+- `cross_sell_reason` (string)
+
+- `capabilities_for_rfp` (string[] or string) — which practices/services apply
+- `capabilities_pages` (int[] | null)
+- `capabilities_reason` (string)
+
+### D) Audit + Ops
+- `doc_id`, `source_url`, `sharepoint_path`
+- `page_count`
+- `model_name`, `model_version`
+- `run_id`, timestamps, latency metrics
+- `error_flags` (array)
+
+---
+
+## 3) Architecture Overview
+
+See: [architecture_diagram.png](../architecture_diagram.png)
+
+### Pipeline Steps
+1. **Trigger**: PDF uploaded to `uploads` container → **Event Grid** subscription fires `RfpBlobTrigger` Azure Function.
+2. **Ingest**: Function downloads blob via Managed Identity → extracts text per page using **pdfplumber** with table detection (configurable `min_table_rows`/`min_table_cols`) and optional page/table image rendering.
+3. **Chunk**: Split by page windows (e.g., 3–8 pages) into chunks. Controlled by `chunking_enabled` / `chunking_max_tokens` config.
+4. **Per-chunk LLM**: Call `analyze_chunk()` with:
+   - current chunk text
+   - page range
+   - running `main_points_state`
+   - extraction instructions
+5. **Reduce**:
+   - Merge `main_points_state` (dedupe + cap size)
+   - Store `chunk_summaries`
+   - Aggregate extraction candidates for fee/date/diversity
+6. **Reconcile** (if needed):
+   - If multiple conflicting candidates → fetch only relevant pages/snippets → call `reconcile_extractions()`
+7. **Final decision**:
+   - Call `final_recommendations()` with:
+     - `summary_final` draft (from reduce)
+     - `main_points_state`
+     - curated "signals" (requirements/skills) extracted per chunk
+     - capabilities reference (from `reference` container)
+8. **Persist**: Write final record to `outputs` container (or SQL).
+9. **Surface**: Power BI uses SQL (or reads from storage).
+
+### Infrastructure Components
+| Component | Role |
+|---|---|
+| Azure Storage | `uploads` (input), `reference` (capabilities PDF), `outputs` (results), `prompts` (LLM templates & schemas) |
+| Azure Event Grid | Subscription on storage → delivers BlobCreated events to function |
+| Azure Functions (Flex Consumption) | Hosts `RfpBlobTrigger` (EventGrid), `manual_run` (HTTP), SharePoint webhook/queue (optional) |
+| pdfplumber | PDF text extraction with table detection and page image rendering |
+| Azure OpenAI | `gpt-5-mini` deployment with function calling; standalone OpenAI account |
+| Managed Identity | System-assigned MI on Function App with Storage Blob Data Contributor + Cognitive Services OpenAI User roles |
+
+### Externalized Prompts & Schemas
+All LLM prompt templates and function-call JSON schemas are stored in the `prompts` blob container. They are loaded at runtime, allowing updates without redeploying code.
+
+| Asset | Blob Path |
+|---|---|
+| System prompt | `prompts/system_prompt.txt` |
+| User prompt | `prompts/user_prompt.txt` |
+| Chunk system prompt | `prompts/chunk_system_prompt.txt` |
+| Chunk user prompt | `prompts/chunk_user_prompt.txt` |
+| Reconcile system prompt | `prompts/reconcile_system_prompt.txt` |
+| Reconcile user prompt | `prompts/reconcile_user_prompt.txt` |
+| Full extraction schema | `schemas/rfp_fields_schema.json` |
+| Chunk extraction schema | `schemas/rfp_fields_chunk_schema.json` |
+
+### Deployment Scripts
+| Script | Purpose |
+|---|---|
+| `deploy/deploy-infra.ps1` | Idempotent creation of RG, Storage, OpenAI, Function App, RBAC, app settings |
+| `deploy/upload-prompts.ps1` | Upload prompt templates and schemas to `prompts` container |
+| `deploy/deploy-function.ps1` | Deploy function code + create Event Grid subscription |
+
+---
+
+## 4) Chunking Strategy
+### Input types
+- Digital PDF preferred.
+- Word doc → convert to PDF or extract text with page-like segmentation.
+
+### Page mapping requirements
+- Maintain `page_index` for each text segment (page number from the PDF renderer / extractor).
+- Store chunk metadata:
+  - `chunk_id`
+  - `page_start`, `page_end`
+  - `text`
+
+### Chunk size heuristics
+- Start with 3–8 pages per chunk (tune based on token count).
+- Hard cap chunk tokens to stay below ~60% of model context to leave room for instructions + JSON overhead.
+- If a page is extremely long, split within-page by headings/paragraph blocks but keep `page_index`.
+
+---
+
+## 5) Continuity: `main_points_state` (Anti-drift)
+### Goal
+Maintain continuity without rolling summary drift.
+
+### Rule
+Never feed the model the prior chunk summary. Feed only `main_points_state` (bullets), capped.
+
+### Merge algorithm (pseudo)
+- Inputs: `main_points_state`, `main_points_update`
+- Steps:
+  1) Normalize bullets: lowercase + trim + remove punctuation noise.
+  2) Deduplicate: cosine similarity > threshold or simple token overlap heuristic.
+  3) Cap: keep most recent + highest importance (LLM may label importance 1–3).
+  4) Output new `main_points_state`.
+
+### Recommended caps
+- Max bullets: 40–60
+- Max chars per bullet: ~180
+
+---
+
+## 6) LLM Function Calling Contracts
+All responses MUST be a function call with JSON arguments. No free text.
+
+### 6.1 `analyze_chunk()` schema
+**Purpose**: summarize this chunk; update main points; extract candidates if present; capture signals.
+
+```json
+{
+  "name": "analyze_chunk",
+  "description": "Analyze one RFP chunk. Summarize chunk only. Update main points. Extract fee/date/diversity if found. Emit signals for later matching.",
+  "parameters": {
+    "type": "object",
+    "required": ["chunk_id","page_start","page_end","chunk_summary","main_points_update","extractions","signals"],
+    "properties": {
+      "chunk_id": {"type":"string"},
+      "page_start": {"type":"integer"},
+      "page_end": {"type":"integer"},
+      "chunk_summary": {"type":"string", "description":"Summary of this chunk only."},
+      "main_points_update": {
+        "type":"array",
+        "items":{"type":"string"},
+        "description":"Only NEW bullets discovered in this chunk (do not repeat prior main points)."
+      },
+      "extractions": {
+        "type":"object",
+        "required":["fee","date","diversity_allocation"],
+        "properties": {
+          "fee": {
+            "type":"object",
+            "required":["value","pages","confidence","anchor"],
+            "properties":{
+              "value":{"type":["string","null"], "description":"Fee/budget found in this chunk, else null."},
+              "pages":{"type":"array","items":{"type":"integer"}},
+              "confidence":{"type":"number"},
+              "anchor":{"type":["string","null"], "description":"Short locating hint, NOT a quote. ex: 'Fee Proposal in separate envelope' or '$2.75 million budget'."}
+            }
+          },
+          "date": {
+            "type":"object",
+            "required":["value","pages","confidence","anchor"],
+            "properties":{
+              "value":{"type":["string","null"], "description":"Submission deadline/date found, else null."},
+              "pages":{"type":"array","items":{"type":"integer"}},
+              "confidence":{"type":"number"},
+              "anchor":{"type":["string","null"]}
+            }
+          },
+          "diversity_allocation": {
+            "type":"object",
+            "required":["value","pages","confidence","anchor"],
+            "properties":{
+              "value":{"type":["string","null"], "description":"Diversity requirement found, else null."},
+              "pages":{"type":"array","items":{"type":"integer"}},
+              "confidence":{"type":"number"},
+              "anchor":{"type":["string","null"]}
+            }
+          }
+        }
+      },
+      "signals": {
+        "type":"object",
+        "required":["requirements","skills","deliverables","keywords"],
+        "properties":{
+          "requirements":{"type":"array","items":{"type":"string"}, "description":"Key requirements mentioned in this chunk."},
+          "skills":{"type":"array","items":{"type":"string"}, "description":"Required skillsets/certs mentioned."},
+          "deliverables":{"type":"array","items":{"type":"string"}, "description":"Explicit deliverables."},
+          "keywords":{"type":"array","items":{"type":"string"}, "description":"Useful matching keywords."}
+        }
+      }
+    }
+  }
+}
+```
+
+### 6.2 `reconcile_extractions()` schema
+**Purpose**: resolve conflicts for fee/date/diversity using only selected pages/snippets.
+
+```json
+{
+  "name": "reconcile_extractions",
+  "description": "Given conflicting candidates for fee/date/diversity, choose final values and explain briefly. Use provided page texts only.",
+  "parameters": {
+    "type":"object",
+    "required":["doc_id","fee","date","diversity_allocation"],
+    "properties":{
+      "doc_id":{"type":"string"},
+      "fee":{
+        "type":"object",
+        "required":["value","pages","confidence","reason"],
+        "properties":{
+          "value":{"type":["string","null"]},
+          "pages":{"type":"array","items":{"type":"integer"}},
+          "confidence":{"type":"number"},
+          "reason":{"type":"string"}
+        }
+      },
+      "date":{
+        "type":"object",
+        "required":["value","pages","confidence","reason"],
+        "properties":{
+          "value":{"type":["string","null"]},
+          "pages":{"type":"array","items":{"type":"integer"}},
+          "confidence":{"type":"number"},
+          "reason":{"type":"string"}
+        }
+      },
+      "diversity_allocation":{
+        "type":"object",
+        "required":["value","pages","confidence","reason"],
+        "properties":{
+          "value":{"type":["string","null"]},
+          "pages":{"type":"array","items":{"type":"integer"}},
+          "confidence":{"type":"number"},
+          "reason":{"type":"string"}
+        }
+      }
+    }
+  }
+}
+```
+
+### 6.3 `final_recommendations()` schema
+**Purpose**: decide best lead org + cross-sell + capabilities based on final summary + signals + capabilities reference.
+
+```json
+{
+  "name": "final_recommendations",
+  "description": "Produce coherent best lead org, cross-sell opportunities, and capabilities mapping based on RFP summary + extracted signals + capabilities reference.",
+  "parameters": {
+    "type":"object",
+    "required":["doc_id","summary_final","best_lead_org","cross_sell_opps","capabilities_for_rfp"],
+    "properties":{
+      "doc_id":{"type":"string"},
+      "summary_final":{"type":"string", "description":"Final narrative summary (concise)."},
+      "best_lead_org":{
+        "type":"object",
+        "required":["value","pages","reason"],
+        "properties":{
+          "value":{"type":"string"},
+          "pages":{"type":"array","items":{"type":"integer"}},
+          "reason":{"type":"string"}
+        }
+      },
+      "cross_sell_opps":{
+        "type":"object",
+        "required":["value","pages","reason"],
+        "properties":{
+          "value":{"type":"array","items":{"type":"string"}},
+          "pages":{"type":"array","items":{"type":"integer"}},
+          "reason":{"type":"string"}
+        }
+      },
+      "capabilities_for_rfp":{
+        "type":"object",
+        "required":["value","pages","reason"],
+        "properties":{
+          "value":{"type":"array","items":{"type":"string"}},
+          "pages":{"type":"array","items":{"type":"integer"}},
+          "reason":{"type":"string"}
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+## 7) Prompting Rules (System/Developer-level Constraints)
+
+### For `analyze_chunk()`
+- MUST only summarize current chunk; do not restate prior main points.
+- Extractions: If not found, return `value=null`, `pages=[]`, `confidence=0`. If found, include pages within `[page_start..page_end]`.
+- Anchor must be a short locator, not a quote.
+- Signals must be concise and de-duplicated.
+
+### For reconciliation
+- Only use provided page texts.
+- Prefer explicit "Proposal Due Date" / "Submission Deadline" strings.
+- Prefer "Budget / Not-to-Exceed" for fee if present.
+
+### For final recommendations
+- Choose 1 lead org.
+- Provide cross-sell list (0–8 items).
+- Capabilities list is "what we do that matches this RFP".
+
+---
+
+## 8) Candidate Aggregation + Conflict Detection
+
+### Aggregation
+For each chunk, if `value != null`: append candidate with `value`, `pages`, `confidence`, `anchor`, `chunk_id`.
+
+### Conflict detection
+Normalize values:
+- fee: strip commas/currency, normalize to numeric if possible
+- date: parse into ISO if possible
+- diversity: extract percentages + program names (MBE/WBE/DBE/SDVOB)
+
+If >1 distinct normalized values exist above confidence threshold (e.g., >= 0.6), trigger reconciliation.
+
+### Reconciliation input selection
+- Union of pages for the conflicting candidates (cap to N pages, e.g., <= 12).
+- Provide extracted page text snippets (from the PDF text extractor), not the full doc.
+
+---
+
+## 9) Evidence Snippet (Non-LLM)
+
+### Goal
+Create `evidence_snippet` for each extracted field without asking the LLM to quote.
+
+### Inputs
+`value`, `pages`, optional `anchor`, extracted page texts.
+
+### Method
+If value has regex match:
+- fee: regex for $ + number, or NTE patterns
+- date: date regex patterns
+- diversity: percentage regex + keywords (MBE/WBE/DBE)
+
+Use fuzzy search around anchor if present. Return N-word snippet (e.g., 30–60 words), plus the page number.
+
+If matching fails: set `evidence_snippet=null`, flag `evidence_not_found=true`.

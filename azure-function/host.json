@@ -1,0 +1,31 @@
+{
+  "version": "2.0",
+  "logging": {
+    "logLevel": {
+      "default": "Information",
+      "Function": "Information",
+      "Host.Results": "Information",
+      "Host.Aggregator": "Information",
+      "Host.Triggers": "Warning",
+      "Host.Executor": "Warning",
+      "Host.General": "Warning",
+      "azure": "Warning",
+      "azure.core": "Warning",
+      "Azure.Core": "Warning",
+      "Azure.Identity": "Warning",
+      "azure.storage": "Warning",
+      "azure.core.pipeline.policies.http_logging_policy": "Warning",
+      "Azure.Core.Http": "Warning"
+    },
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": true,
+        "excludedTypes": "Request"
+      }
+    }
+  },
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.*, 5.0.0)"
+  }
+}

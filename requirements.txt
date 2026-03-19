@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+gunicorn
+azure-storage-blob
+azure-identity

@@ -1,0 +1,9 @@
+azure-functions
+azure-identity
+azure-storage-blob
+azure-storage-queue
+openai
+pdfplumber
+pyodbc
+requests
+tiktoken
